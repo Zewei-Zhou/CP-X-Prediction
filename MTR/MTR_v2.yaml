@@ -1,4 +1,5 @@
 model_name: MTR
+# This .yaml is for a training configuration that lasts a small amount of epochs just to verify training is happening correctly
 
 # Data Config
 train_data_path: [/data2/dataset/waymo/scenario_processed/training] # CONSIDER CHANGING 
@@ -14,7 +15,7 @@ batch_size: 128
 num_workers: 8
 lr: 0.0002
 weight_decay: 0.01
-epochs: 50
+epochs: 5
 lr_warmup_step: 200
 lr_step_freq: 200
 lr_step_gamma: 0.96
