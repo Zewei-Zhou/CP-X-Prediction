@@ -1,0 +1,19 @@
+cfg:
+  batch_size: 128
+  decoder_layers: 4
+  encoder_layers: 4
+  epochs: 50
+  lr: 0.0002
+  lr_step_freq: 200
+  lr_step_gamma: 0.96
+  lr_warmup_step: 200
+  model_name: MTR
+  num_workers: 8
+  output_path:
+  - /data/robert/CP-X-Prediction/MTR/output
+  seed: 42
+  train_data_path:
+  - /data/dataset/CP-X-Prediction/Waymo/training_processed
+  val_data_path:
+  - /data/dataset/CP-X-Prediction/Waymo/validation_processed
+  weight_decay: 0.01

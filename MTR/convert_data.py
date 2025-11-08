@@ -97,12 +97,21 @@ from maps import *
 
 # Data
 training_prefix = "/data2/dataset/waymo/scenario_processed/training" 
+# training_prefix = "/data2/dataset/waymo/scenario_processed_tiny/training"
 validation_prefix = "/data2/dataset/waymo/scenario_processed/validation"
 testing_prefix = "/data2/dataset/waymo/scenario_processed/testing"
 # training files are .pkl files, not .csv like before
-train_files = list(glob.glob(os.path.join(training_prefix, "*.pkl")))
-validation_files = list(glob.glob(os.path.join(validation_prefix, "*.pkl")))
-testing_files = list(glob.glob(os.path.join(testing_prefix, "*.pkl")))
+train_files_all = list(glob.glob(os.path.join(training_prefix, "*.pkl")))
+validation_files_all = list(glob.glob(os.path.join(validation_prefix, "*.pkl")))
+testing_files_all = list(glob.glob(os.path.join(testing_prefix, "*.pkl")))
+
+# Use 1/3 of the sample size
+train_files = train_files_all[:len(train_files_all) // 3]
+validation_files = validation_files_all[:len(validation_files_all) // 3]
+testing_files = testing_files_all[:len(testing_files_all) // 3]
+# train_files = train_files_all[:int(1/3 * len(train_files_all))]
+# validation_files = validation_files_all[:int(1/3 * len(validation_files_all))]
+# testing_files = testing_files_all[:int(1/3 * len(testing_files_all))]
 
 # map class
 # map_class = {
@@ -127,13 +136,13 @@ vehicle_class = ['Vehicle']  # Remove the duplicate definition
 subclass_values = list(object_type_class.values())
 
 # Parameters
-output_path_training = '/data/robert/CP-X-Prediction/MTR/data/training_processed'
+output_path_training = '/data/dataset/CP-X-Prediction/Waymo/training_processed'
 os.makedirs(output_path_training, exist_ok=True)
 
-output_path_validation = '/data/robert/CP-X-Prediction/MTR/data/validation_processed'
+output_path_validation = '/data/dataset/CP-X-Prediction/Waymo/validation_processed'
 os.makedirs(output_path_validation, exist_ok=True)
 
-output_path_testing = '/data/robert/CP-X-Prediction/MTR/data/testing_processed'
+output_path_testing = '/data/dataset/CP-X-Prediction/Waymo/testing_processed'
 os.makedirs(output_path_testing, exist_ok=True)
 
 # includes pasts 10 history frames + 1 current frame
@@ -426,6 +435,11 @@ if __name__ == '__main__':
         validation_prefix: (validation_files, output_path_validation),
         testing_prefix: (testing_files, output_path_testing)
     }
+    
+    all_data = {
+        testing_prefix: (testing_files, output_path_testing)
+    }
+  
 
     for input_prefix, (input_files, output_path) in all_data.items():
         logging.info(f"Processing {len(input_files)} files from {input_prefix}")
@@ -480,15 +494,15 @@ if __name__ == '__main__':
                     with open(output_file, 'wb') as f:
                         pickle.dump(inputs, f)
                         print(f"Saving output to {output_file}")
-                        
-                    if agent_trajectory_data['sub_class'] in vehicle_class:
-                        # make sure that agent is vehicle and duplicate data 5 times
-                        for d in range(5):
-                            inputs = process_model_input(trajectory_data, ki, map_polyline, future_gt_data)
-                            output_file = os.path.join(output_path, f"{scenario_id}_{int(k)}_{d+1}.pkl")
-                            with open(output_file, 'wb') as f:
-                                print(f"Saving output (where subclass is vehicle) to {output_file}")
-                                pickle.dump(inputs, f)
+                    
+                    # if agent_trajectory_data['sub_class'] in vehicle_class:
+                    #     # make sure that agent is vehicle and duplicate data 5 times
+                    #     for d in range(5):
+                    #         inputs = process_model_input(trajectory_data, ki, map_polyline, future_gt_data)
+                    #         output_file = os.path.join(output_path, f"{scenario_id}_{int(k)}_{d+1}.pkl")
+                    #         with open(output_file, 'wb') as f:
+                    #             print(f"Saving output (where subclass is vehicle) to {output_file}")
+                    #             pickle.dump(inputs, f)
 
             except Exception as e:
                 logging.exception(f"Error processing file {input_files[i]}: {e}")

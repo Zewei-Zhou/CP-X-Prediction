@@ -5,7 +5,7 @@ import os
 
 from model import MTR
 # from model_simple import MTR
-from train_utils import WaymoDataset, load_config
+from train_utils import WaymoDataset, load_config, collate_waymo_data
 from torch.utils.data import DataLoader
 
 import lightning.pytorch as pl
@@ -16,7 +16,7 @@ from lightning.pytorch.strategies import DDPStrategy
 
 def train(cfg_file):
     print("Start Training")
-    torch.set_float32_matmul_precision('high')    
+    torch.set_float32_matmul_precision('high')      
     cfg = load_config(cfg_file)
     pl.seed_everything(cfg['seed'])
     
@@ -31,7 +31,8 @@ def train(cfg_file):
         batch_size=cfg['batch_size'], 
         pin_memory=True, 
         num_workers=cfg['num_workers'],
-        shuffle=True
+        shuffle=True,
+        collate_fn=collate_waymo_data
     )
     
     val_loader = DataLoader(
@@ -39,7 +40,8 @@ def train(cfg_file):
         batch_size=cfg['batch_size'],
         pin_memory=True, 
         num_workers=cfg['num_workers'],
-        shuffle=False
+        shuffle=False, 
+        collate_fn=collate_waymo_data
     )
     
     model = MTR(cfg)

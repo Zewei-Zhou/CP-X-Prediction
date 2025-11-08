@@ -17,6 +17,7 @@ class MTR(pl.LightningModule):
         self.cfg = cfg
         self.encoder = Encoder(cfg['encoder_layers'])
         self.predictor = Predictor(cfg['decoder_layers'])
+        torch.set_grad_enabled(True)
 
     ################### Training Setup ###################
     def configure_optimizers(self):

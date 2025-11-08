@@ -5,6 +5,8 @@ import pickle
 import glob
 import numpy as np
 from torch.utils.data import Dataset
+import torch.nn.functional as F
+# from torch.nn.utils.rnn import pad_sequence
 
 
 def load_config(file_path):
@@ -83,17 +85,20 @@ class WaymoDataset(Dataset):
     
     def __getitem__(self, idx):
         data = self.load_data(self.data_list[idx])
-        maps = data['maps']
-        hist_trajs = data['hist_trajs']
-        hist_valid = data['hist_valid']
-        fut_trajs = data['fut_gt_trajs']
-        fut_valid = data['fut_valid']
+        # maps = torch.from_numpy(data['maps'])
+        # hist_trajs = torchdata['hist_trajs']
+        # hist_valid = data['hist_valid']
+        # fut_trajs = data['fut_gt_trajs']
+        # fut_valid = data['fut_valid']
 
-        inputs = {'hist_trajs': hist_trajs, 'maps': maps, 
-                  'hist_valid': hist_valid, 'fut_gt_trajs': fut_trajs, 
-                  'fut_valid': fut_valid}
-        
-        return inputs
+        return {
+            'hist_trajs': torch.from_numpy(data['hist_trajs']).to(torch.float16),
+            'maps': torch.from_numpy(data['maps']).float(),
+            'fut_gt_trajs': torch.from_numpy(data['fut_gt_trajs'],
+            'hist_valid': torch.from_numpy(data['hist_valid']).float(),
+            'fut_valid': torch.from_numpy(data['fut_valid']).float()
+        }
+    
     
 
 def batch_nms(pred_trajs, pred_scores, dist_thresh=3, num_ret_modes=6):
@@ -145,4 +150,90 @@ def batch_nms(pred_trajs, pred_scores, dist_thresh=3, num_ret_modes=6):
     ret_idxs = sorted_idxs[bs_idxs, ret_idxs]
 
     return ret_trajs, ret_scores, ret_idxs
+
+# def collate_waymo_data(get_item_values):
+#     # input is a batch size of getitem dictionaries, in this case there are 128 batches
+#     # list of 128 dictionaries containing 5 keys
+#     #   def __getitem__(self, idx):
+#     #     data = self.load_data(self.data_list[idx])
+#     #     maps = data['maps']
+#     #     hist_trajs = data['hist_trajs']
+#     #     hist_valid = data['hist_valid']
+#     #     fut_trajs = data['fut_gt_trajs']
+#     #     fut_valid = data['fut_valid']
+
+#     #     inputs = {'hist_trajs': hist_trajs, 'maps': maps, 
+#     #               'hist_valid': hist_valid, 'fut_gt_trajs': fut_trajs, 
+#     #               'fut_valid': fut_valid}
+        
+#     #     return inputs
+#     keys = list(get_item_values[0].keys())
+#     final_collated_tensor_dict = {}
+#     if keys != ['hist_trajs', 'maps', 'hist_valid', 'fut_gt_trajs', 'fut_valid']:
+#         raise ValueError(f"Unexpected keys in get_item_values: {keys}")
+#     for key in get_item_values:
+#         current_key_batch_values = []
+#         current_key_batch_values_tensors = []
+#         for i in range(len(get_item_values)):
+#             current_key_batch_values.append(get_item_values[i][key])
+#         # find index of longest subarray within array of arrays
+#         pad_length = len(max(current_key_batch_values, key=len))
+#         for j in range(len(get_item_values)):
+#             padded_tensor = F.pad(input = current_key_batch_values[j], pad = (0, pad_length), 
+#                                 mode = "constant", value=0)
+#             current_key_batch_values_tensors.append(padded_tensor)
+#         tensorized_batch_key = torch.stack(current_key_batch_values_tensors, dim=0)
+#         final_collated_tensor_dict[key] = tensorized_batch_key
+#     return final_collated_tensor_dict
     
+def collate_waymo_data(batch):
+    """
+    Collate function for Waymo dataset with variable numbers of agents/polylines
+    """
+    batch_size = len(batch)
+    
+    # Find max dimensions
+    max_agents = max(item['hist_trajs'].shape[0] for item in batch)
+    max_polylines = max(item['maps'].shape[0] for item in batch)
+    
+    # Pad and collect
+    hist_trajs_list = []
+    fut_gt_trajs_list = []
+    hist_valid_list = []
+    fut_valid_list = []
+    maps_list = []
+    
+    for item in batch:
+        num_agents = item['hist_trajs'].shape[0]
+        num_polylines = item['maps'].shape[0]
+        
+        agent_pad = max_agents - num_agents
+        polyline_pad = max_polylines - num_polylines
+        
+        # Pad agents dimension for trajectory data
+        hist_trajs_list.append(
+            F.pad(item['hist_trajs'], (0, 0, 0, 0, 0, agent_pad), value=0)
+        )
+        fut_gt_trajs_list.append(
+            F.pad(item['fut_gt_trajs'], (0, 0, 0, 0, 0, agent_pad), value=0)
+        )
+        hist_valid_list.append(
+            F.pad(item['hist_valid'], (0, 0, 0, agent_pad), value=0)
+        )
+        fut_valid_list.append(
+            F.pad(item['fut_valid'], (0, 0, 0, agent_pad), value=0)
+        )
+        
+        # Pad polylines dimension for map data
+        maps_list.append(
+            F.pad(item['maps'], (0, 0, 0, 0, 0, polyline_pad), value=0)
+        )
+    
+    # Stack into batch
+    return {
+        'hist_trajs': torch.stack(hist_trajs_list),
+        'fut_gt_trajs': torch.stack(fut_gt_trajs_list),
+        'hist_valid': torch.stack(hist_valid_list),
+        'fut_valid': torch.stack(fut_valid_list),
+        'maps': torch.stack(maps_list)
+    }

@@ -1,0 +1,5 @@
+Start Training
+Train Dataset: 476778
+Val Dataset: 89811
+Total GPUS: 8
+Build Trainer

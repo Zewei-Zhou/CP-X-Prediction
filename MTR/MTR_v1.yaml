@@ -1,8 +1,11 @@
 model_name: MTR
 
 # Data Config
-train_data_path: [/data2/dataset/waymo/scenario_processed/training] # CONSIDER CHANGING 
-val_data_path: [/data2/dataset/waymo/scenario_processed/validation] # CONSIDER CHANGING 
+train_data_path: [/data/dataset/CP-X-Prediction/Waymo/training_processed] # CONSIDER CHANGING 
+val_data_path: [/data/dataset/CP-X-Prediction/Waymo/validation_processed] # CONSIDER CHANGING 
+
+# Output Config
+output_path: [/data/robert/CP-X-Prediction/MTR/output]
 
 # Model Config
 encoder_layers: 4
@@ -10,7 +13,7 @@ decoder_layers: 4
 
 # Training Params
 seed: 42
-batch_size: 128
+batch_size: 16 # originally 128
 num_workers: 8
 lr: 0.0002
 weight_decay: 0.01
