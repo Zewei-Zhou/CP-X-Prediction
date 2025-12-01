@@ -187,8 +187,8 @@ class MTR(pl.LightningModule):
         weights = F.softmax(scores, dim=1) # [B, Q]
         weighted_mse = torch.sum(mse * weights[:, :, None], dim=1) # [B, T]
 
-        weighted_ADE = weighted_mse.sum() / gt_mask.sum()
-        weighted_FDE = weighted_mse[..., -1].sum() / gt_mask[..., -1].sum()
+        weighted_ADE = weighted_mse.sum() / gt_mask.sum().clamp(min=1)
+        weighted_FDE = weighted_mse[..., -1].sum() / gt_mask[..., -1].sum().clamp(min=1)
             
         return weighted_ADE.item(), weighted_FDE.item()
 
