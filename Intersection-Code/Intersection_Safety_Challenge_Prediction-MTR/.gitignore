@@ -1,0 +1,70 @@
+/map/.idea/
+# python
+*.pyc
+**/__pycache__/
+.pytest_cache/*
+.pydevproject
+
+# IDE
+.vscode/*
+
+# Ignore all .pkl files
+*.pkl
+
+# Ignore common large data formats and archives
+*.csv
+*.tsv
+*.parquet
+*.hdf5
+*.h5
+*.npy
+*.npz
+*.bin
+*.zip
+*.tar.gz
+*.tgz
+*.rar
+
+# Ignore model checkpoints and saved models
+*.ckpt
+*.pt
+*.pth
+*.keras
+*.onnx
+model_weights/
+saved_models/
+
+# Ignore common output and temporary directories/files
+# data/
+# output/
+# results/
+# logs/
+# tmp/
+# temp/
+__pycache__/
+.ipynb_checkpoints/
+.DS_Store
+
+# Ignore environment files
+.env
+venv/
+env/
+
+# Ignore IDE-specific files (adjust for your IDE)
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Ignore Jupyter Notebook specific files
+*.ipynb_checkpoints
+
+# Ignore other potentially large or irrelevant files
+*.log
+*.bak
+
+# Ignore .txt files which I use for displaying the content of .pkl files
+*.txt
+
+# Ignore TensorBoard event files
+events.out.tfevents.*
