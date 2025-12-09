@@ -196,12 +196,20 @@ def train(cfg_file):
         print(f"Training failed: {e}")
         print("="*60)
         raise
-    
-    
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Train QCNet on Waymo Dataset')
     parser.add_argument('--cfg', type=str, default='MTR_v1.yaml', 
                        help='Config file path')
     args = parser.parse_args()
     
-    train(args.cfg)
+    try:
+        train(args.cfg)
+    finally:
+        # Always release GPU, even if training crashes
+        import torch
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            print("\n✅ GPU memory released")
+        import sys
+        sys.exit(0)
