@@ -1,361 +1,512 @@
+"""
+Improved MTR Model for Waymo Dataset
+Based on mentor's architecture with fixes for:
+1. Missing current position offset in predictions
+2. Loss dilution from invalid timesteps
+3. Proper masking in all loss terms
+4. Better numerical stability
+"""
+
 import torch
+import numpy as np
 import torch.nn as nn
+import torch.nn.functional as F
 import lightning.pytorch as pl
-
-
-class FourierEmbedding(nn.Module):
-    def __init__(self, input_dim, d_model, num_freq_bands=64):
-        super().__init__()
-        self.num_freq_bands = num_freq_bands
-        self.d_model = d_model
-        
-        # Create frequency bands
-        freq_bands = 2.0 ** torch.linspace(0, num_freq_bands-1, num_freq_bands)
-        self.register_buffer('freq_bands', freq_bands)
-        
-        # Project concatenated sins and cosines to d_model
-        self.proj = nn.Linear(input_dim * num_freq_bands * 2, d_model)
-    
-    def forward(self, x):
-        # x: (..., input_dim)
-        # Expand for frequency bands
-        x_freq = x.unsqueeze(-1) * self.freq_bands  # (..., input_dim, num_freq_bands)
-        
-        # Compute sin and cos
-        x_sin = torch.sin(2 * 3.14159 * x_freq)
-        x_cos = torch.cos(2 * 3.14159 * x_freq)
-        
-        # Concatenate and flatten
-        x_encoded = torch.cat([x_sin, x_cos], dim=-1)  # (..., input_dim, num_freq_bands*2)
-        x_encoded = x_encoded.flatten(start_dim=-2)  # (..., input_dim * num_freq_bands * 2)
-        
-        return self.proj(x_encoded)
+from torch.nn.functional import smooth_l1_loss, cross_entropy
 
 
 class MTR(pl.LightningModule):
-    def __init__(self, config):
+    def __init__(self, cfg: dict):
         super().__init__()
         self.save_hyperparameters()
-        self.config = config
-        
-        self.encoder = Encoder(config)
-        self.predictor = Predictor(config)
-        
-    def forward_and_get_loss(self, batch, prefix='train/'):
-        eps = 1e-7  # Epsilon for numerical stability
-        
-        hist_trajs = batch['hist_trajs']  # (B, N, 11, 6)
-        hist_valid = batch['hist_valid']  # (B, N, 11)
-        fut_gt_trajs = batch['fut_gt_trajs']  # (B, N, 80, 2)
-        fut_valid = batch['fut_valid']  # (B, N, 80)
-        maps = batch['maps']  # (B, M, 10, 4)
+        self.cfg = cfg
+        self.encoder = Encoder(cfg.get('encoder_layers', 4))
+        self.predictor = Predictor(cfg.get('decoder_layers', 4))
 
-        B, N = hist_trajs.shape[:2]
+    def configure_optimizers(self):
+        params_to_update = [p for p in self.parameters() if p.requires_grad]
+        assert len(params_to_update) > 0, 'No parameters to update'
         
-        # Forward pass through model
+        optimizer = torch.optim.AdamW(
+            params_to_update, 
+            lr=self.cfg['lr'],
+            weight_decay=self.cfg.get('weight_decay', 0.01)
+        )
+        
+        lr_warmup_step = self.cfg.get('lr_warmup_step', 500)
+        lr_step_freq = self.cfg.get('lr_step_freq', 200)
+        lr_step_gamma = self.cfg.get('lr_step_gamma', 0.98)
+
+        def lr_update(step):
+            if step < lr_warmup_step:
+                lr_scale = 1 - (lr_warmup_step - step) / lr_warmup_step * 0.99
+            else:
+                n = (step - lr_warmup_step) // lr_step_freq
+                lr_scale = lr_step_gamma ** n
+            return max(lr_scale, 1e-2)
+        
+        scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lr_update)
+        return [optimizer], [{"scheduler": scheduler, "interval": "step"}]
+        
+    def forward(self, inputs):
+        encoder_outputs = self.encoder(inputs)
+        predictor_outputs = self.predictor(encoder_outputs)
+        return predictor_outputs
+    
+    def forward_and_get_loss(self, batch, prefix=''):
+        log_dict = {}
+        eps = 1e-7
+     
         encoder_outputs = self.encoder(batch)
-        predictions = self.predictor(encoder_outputs, batch)
+        predictor_outputs = self.predictor(encoder_outputs)
+        ground_truth = batch['fut_gt_trajs']  # [B, N, T, 2]
+        ground_truth_valid = batch['fut_valid']  # [B, N, T]
+
+        # ========== Auxiliary Loss (all agents) ==========
+        aux_trajs = predictor_outputs['aux_trajs']  # [B, N, T, 2]
         
-        pred_trajs = predictions['trajectories']  # (B, N, K, 80, 2)
-        pred_scores = predictions['scores']      # (B, N, K)
+        # FIXED: Proper masked loss calculation
+        aux_mask = ground_truth_valid[..., None].float()  # [B, N, T, 1]
+        aux_loss_raw = smooth_l1_loss(aux_trajs, ground_truth, reduction='none')  # [B, N, T, 2]
+        aux_loss = (aux_loss_raw * aux_mask).sum() / aux_mask.sum().clamp(min=1)
         
-        K = pred_trajs.shape[2]  # number of modes
+        total_loss = aux_loss
         
-        # Expand gt for all modes
-        gt_trajs = fut_gt_trajs.unsqueeze(2).expand(-1, -1, K, -1, -1)  # (B, N, K, 80, 2)
-        valid_mask = fut_valid.unsqueeze(2).expand(-1, -1, K, -1)  # (B, N, K, 80)
+        # ========== Main Prediction Loss (center agent only) ==========
+        level_K = self.cfg.get('decoder_layers', 4)
+        center_gt = ground_truth[:, 0]  # [B, T, 2]
+        center_valid = ground_truth_valid[:, 0]  # [B, T]
+
+        for k in range(level_K):
+            trajs = predictor_outputs[f"layer_{k}_trajs"]  # [B, Q, T, 2]
+            scores = predictor_outputs[f"layer_{k}_scores"]  # [B, Q]
+            
+            traj_loss, score_loss, weighted_ade = self.predict_loss(
+                trajs, scores, center_gt, center_valid
+            )
+            
+            # Loss weighting
+            pred_loss = traj_loss + 0.1 * score_loss + 0.1 * weighted_ade
+            total_loss = total_loss + pred_loss
         
-        # Compute displacement errors for all modes
-        displacement = pred_trajs - gt_trajs  # (B, N, K, 80, 2)
-        # FIXED: Add epsilon inside sqrt for numerical stability
-        distance = torch.sqrt((displacement ** 2).sum(dim=-1) + eps)  # (B, N, K, 80)
+        # ========== Metrics (using final layer predictions) ==========
+        final_trajs = predictor_outputs[f"layer_{level_K-1}_trajs"]
+        final_scores = predictor_outputs[f"layer_{level_K-1}_scores"]
+
+        pred_ade, pred_fde = self.calculate_metrics(
+            final_trajs, final_scores, center_gt, center_valid
+        )
+            
+        log_dict.update({
+            f'{prefix}loss': total_loss.item(),
+            f'{prefix}aux_loss': aux_loss.item(),
+            f'{prefix}traj_loss': traj_loss.item(),
+            f'{prefix}score_loss': score_loss.item(),
+            f'{prefix}weighted_ade_loss': weighted_ade.item(),
+            f'{prefix}weighted_ADE': pred_ade,
+            f'{prefix}weighted_FDE': pred_fde,
+        })
         
-        # Apply mask
-        masked_distance = distance * valid_mask  # (B, N, K, 80)
-        
-        # ADE for each mode
-        ade = masked_distance.mean(dim=-1)  # (B, N, K)
-        
-        # FIXED: Weighted ADE with safe division
-        weighted_ade_loss = (ade * valid_mask[:, :, :, 0]).sum() / valid_mask[:, :, :, 0].sum().clamp(min=1)
-        
-        # Winner-takes-all: find best mode for each agent
-        best_mode_ades, best_mode_idx = ade.min(dim=2)  # (B, N)
-        
-        # Trajectory regression loss (only on best mode)
-        traj_loss = best_mode_ades.mean()
-        
-        # Mode classification loss (cross-entropy)
-        # Target: best mode for each agent
-        log_probs = torch.log_softmax(pred_scores, dim=-1)  # (B, N, K)
-        
-        # Gather log probs for best modes
-        best_log_probs = log_probs.gather(2, best_mode_idx.unsqueeze(-1)).squeeze(-1)  # (B, N)
-        score_loss = -best_log_probs.mean()
-        
-        # FIXED: FDE with epsilon in sqrt
-        fde = torch.sqrt(((pred_trajs[:, :, :, -1] - gt_trajs[:, :, :, -1]) ** 2).sum(dim=-1) + eps)  # (B, N, K)
-        best_mode_fde = fde.gather(2, best_mode_idx.unsqueeze(-1)).squeeze(-1)  # (B, N)
-        
-        # FIXED: Weighted FDE with safe division
-        weighted_FDE = (fde * valid_mask[:, :, :, -1]).sum() / valid_mask[:, :, :, -1].sum().clamp(min=1)
-        
-        # Total loss
-        loss = traj_loss + score_loss
-        
-        # Safety check for NaN/Inf
-        if torch.isnan(loss) or torch.isinf(loss):
-            print(f"WARNING: Invalid loss at step {self.global_step}")
-            print(f"  traj_loss: {traj_loss}, score_loss: {score_loss}")
-            print(f"  pred_trajs: min={pred_trajs.min():.3f}, max={pred_trajs.max():.3f}")
-            loss = torch.tensor(1.0, device=loss.device, requires_grad=True)
-        
-        # Create log dict
-        log_dict = {
-            f'{prefix}loss': loss,
-            f'{prefix}traj_loss': traj_loss,
-            f'{prefix}score_loss': score_loss,
-            f'{prefix}weighted_ADE': weighted_ade_loss,
-            f'{prefix}weighted_FDE': weighted_FDE,
-            f'{prefix}weighted_ade_loss': weighted_ade_loss,
-        }
-        
-        return loss, log_dict
+        return total_loss, log_dict
     
     def training_step(self, batch, batch_idx):
-        try:
-            loss, log_dict = self.forward_and_get_loss(batch, prefix='train/')
-            
-            # Extra safety check
-            if torch.isnan(loss):
-                print(f"NaN loss at step {self.global_step}, skipping batch")
-                return None
-            
-            self.log_dict(log_dict, prog_bar=True, sync_dist=True)
-            return loss
-            
-        except Exception as e:
-            print(f"Error in training step {self.global_step}: {e}")
+        loss, log_dict = self.forward_and_get_loss(batch, prefix='train/')
+        
+        if not torch.isfinite(loss):
+            print(f"WARNING: Invalid loss at step {self.global_step}, skipping")
             return None
+            
+        self.log_dict(log_dict, on_step=True, on_epoch=False, sync_dist=True, prog_bar=True)
+        return loss
     
     def validation_step(self, batch, batch_idx):
         loss, log_dict = self.forward_and_get_loss(batch, prefix='val/')
-        self.log_dict(log_dict, prog_bar=True, sync_dist=True)
+        
+        if not torch.isfinite(loss):
+            return None
+            
+        self.log_dict(log_dict, on_step=False, on_epoch=True, sync_dist=True, prog_bar=True)
         return loss
+
+    def predict_loss(self, trajs, scores, gt_future, gt_valid):
+        """
+        Compute trajectory and score losses for center agent predictions.
+        
+        Args:
+            trajs: [B, Q, T, 2] - Q mode predictions
+            scores: [B, Q] - mode scores
+            gt_future: [B, T, 2] - ground truth
+            gt_valid: [B, T] - validity mask
+        """
+        B, Q, T, _ = trajs.shape
+        eps = 1e-7
+        
+        traj_mask = gt_valid.bool()  # [B, T]
+        gt = gt_future[..., :2]  # [B, T, 2]
+        
+        # Compute distance for all modes
+        dist = torch.norm(trajs - gt[:, None], dim=-1)  # [B, Q, T]
+        dist_masked = dist * traj_mask[:, None].float()  # [B, Q, T]
+        
+        # Select best mode (winner-takes-all)
+        valid_count = traj_mask.sum(dim=-1, keepdim=True).clamp(min=1).float()  # [B, 1]
+        ade_per_mode = dist_masked.sum(dim=-1) / valid_count  # [B, Q]
+        best_idx = torch.argmin(ade_per_mode, dim=-1)  # [B]
+        
+        # Get best trajectory
+        batch_idx = torch.arange(B, device=trajs.device)
+        best_trajs = trajs[batch_idx, best_idx]  # [B, T, 2]
+        
+        # ========== Trajectory Loss ==========
+        # FIXED: Properly masked mean
+        traj_loss_raw = smooth_l1_loss(best_trajs, gt, reduction='none')  # [B, T, 2]
+        traj_loss_masked = traj_loss_raw * traj_mask[..., None].float()  # [B, T, 2]
+        traj_loss = traj_loss_masked.sum() / (traj_mask.sum() * 2).clamp(min=1)
+        
+        # ========== Score Loss ==========
+        # FIXED: Weight by valid samples
+        has_valid = traj_mask.any(dim=-1).float()  # [B] - 1 if sample has any valid timestep
+        score_loss_raw = cross_entropy(scores, best_idx, reduction='none', label_smoothing=0.2)  # [B]
+        score_loss = (score_loss_raw * has_valid).sum() / has_valid.sum().clamp(min=1)
+        
+        # ========== Weighted ADE Loss ==========
+        weights = F.softmax(scores, dim=1)  # [B, Q]
+        weighted_dist = (dist_masked * weights[:, :, None]).sum(dim=1)  # [B, T]
+        weighted_ade = weighted_dist.sum() / traj_mask.sum().clamp(min=1)
+
+        return traj_loss, score_loss, weighted_ade
     
-    def configure_optimizers(self):
-        optimizer = torch.optim.AdamW(
-            self.parameters(),
-            lr=self.config['lr'],
-            weight_decay=self.config.get('weight_decay', 0.01)
-        )
+    @torch.no_grad()
+    def calculate_metrics(self, trajs, scores, gt_future, gt_valid):
+        """Calculate weighted ADE and FDE metrics."""
+        gt = gt_future[..., :2]  # [B, T, 2]
+        gt_mask = gt_valid.bool()  # [B, T]
         
-        # Learning rate scheduler with warmup
-        def lr_lambda(step):
-            warmup_steps = self.config.get('lr_warmup_step', 500)
-            if step < warmup_steps:
-                return step / warmup_steps
-            else:
-                # Exponential decay after warmup
-                decay_step = (step - warmup_steps) // self.config.get('lr_step_freq', 200)
-                return self.config.get('lr_step_gamma', 0.98) ** decay_step
+        # Distance for all modes
+        dist = torch.norm(trajs[..., :2] - gt[:, None], dim=-1)  # [B, Q, T]
+        dist_masked = dist * gt_mask[:, None].float()
         
-        scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
+        # Weight by mode probabilities
+        weights = F.softmax(scores, dim=1)  # [B, Q]
+        weighted_dist = (dist_masked * weights[:, :, None]).sum(dim=1)  # [B, T]
         
-        return {
-            'optimizer': optimizer,
-            'lr_scheduler': {
-                'scheduler': scheduler,
-                'interval': 'step',
-                'frequency': 1
-            }
-        }
+        # ADE: average over all valid timesteps
+        weighted_ADE = weighted_dist.sum() / gt_mask.sum().clamp(min=1)
+        
+        # FDE: only final timestep
+        final_mask = gt_mask[:, -1]  # [B]
+        weighted_FDE = weighted_dist[:, -1].sum() / final_mask.sum().clamp(min=1)
+        
+        return weighted_ADE.item(), weighted_FDE.item()
 
 
 class AgentEncoder(nn.Module):
-    def __init__(self, d_model=256):
+    def __init__(self, d_model=256, d_ffn=1024, n_heads=8, dropout=0.1):
         super().__init__()
-        self.type_embedding = nn.Embedding(5, d_model)  # 5 object types
-        self.pos_embedding = FourierEmbedding(input_dim=2, d_model=d_model)
-        self.vel_embedding = FourierEmbedding(input_dim=2, d_model=d_model)
-        self.heading_embedding = FourierEmbedding(input_dim=1, d_model=d_model)
-        
-        self.temporal_encoder = nn.TransformerEncoder(
-            nn.TransformerEncoderLayer(d_model=d_model, nhead=8, batch_first=True),
-            num_layers=2
+        # FIXED: Reduced type embedding to match Waymo types (0-4)
+        self.type_embed = nn.Embedding(8, d_model, padding_idx=0)  # 8 covers all Waymo types with margin
+        self.time_embed = nn.Embedding(11, d_model)  # 11 history steps
+        self.mlp_encoder = nn.Sequential(
+            nn.Linear(5, d_model // 2), 
+            nn.ReLU(), 
+            nn.Linear(d_model // 2, d_model)
         )
-    
-    def forward(self, hist_trajs, hist_valid):
-        # hist_trajs: (B, N, 11, 6) - [x, y, heading, vx, vy, type]
-        B, N, T, _ = hist_trajs.shape
+        self.transformer_encoder = nn.TransformerEncoderLayer(
+            d_model, n_heads, d_ffn, dropout,
+            activation='gelu', batch_first=True
+        )
+        self.register_buffer('time_indices', torch.arange(11).long())
+
+    def forward(self, object_trajs, valid_mask):
+        """
+        Args:
+            object_trajs: [B, N, T, 6] - [x, y, heading, vx, vy, type]
+            valid_mask: [B, N, T] - True for INVALID positions (for transformer mask)
+        """
+        B, N, T, _ = object_trajs.shape
         
-        # Extract features
-        pos = hist_trajs[..., :2]  # (B, N, 11, 2)
-        heading = hist_trajs[..., 2:3]  # (B, N, 11, 1)
-        vel = hist_trajs[..., 3:5]  # (B, N, 11, 2)
-        obj_type = hist_trajs[..., 5].long()  # (B, N, 11)
+        # Type embedding from last timestep
+        obj_type = object_trajs[:, :, -1, -1].long().clamp(0, 7)  # [B, N]
+        type_embed = self.type_embed(obj_type)  # [B, N, d_model]
+
+        # MLP encoding of trajectory features (all except type)
+        obj_embed = self.mlp_encoder(object_trajs[..., :-1])  # [B, N, T, d_model]
+  
+        # Reshape for transformer: [B*N, T, d_model]
+        obj_embed = obj_embed.view(B * N, T, -1)
+        obj_embed = obj_embed + self.time_embed(self.time_indices)
+
+        # Prepare mask: [B*N, T]
+        mask = valid_mask.view(B * N, T)
         
-        # Embed each feature
-        pos_emb = self.pos_embedding(pos)
-        heading_emb = self.heading_embedding(heading)
-        vel_emb = self.vel_embedding(vel)
-        type_emb = self.type_embedding(obj_type)
+        # FIXED: Ensure at least one valid position per sequence
+        all_invalid = mask.all(dim=-1)
+        if all_invalid.any():
+            mask = mask.clone()
+            mask[all_invalid, -1] = False  # Make last timestep valid
         
-        # Combine embeddings
-        combined = pos_emb + heading_emb + vel_emb + type_emb  # (B, N, 11, d_model)
+        # Transformer encoding
+        encoded = self.transformer_encoder(obj_embed, src_key_padding_mask=mask)
         
-        # Flatten batch and agent dims for transformer
-        combined_flat = combined.view(B * N, T, -1)
-        
-        # Create attention mask from validity
-        valid_flat = hist_valid.view(B * N, T)
-        mask = ~valid_flat.bool()
-        
-        # Temporal encoding
-        encoded = self.temporal_encoder(combined_flat, src_key_padding_mask=mask)
-        
-        # Take last timestep
-        agent_features = encoded[:, -1]  # (B*N, d_model)
-        agent_features = agent_features.view(B, N, -1)
-        
-        return agent_features
+        # Take last timestep and add type embedding
+        encoded = encoded[:, -1].view(B, N, -1)  # [B, N, d_model]
+        encoded = encoded + type_embed
+
+        return encoded
 
 
 class MapEncoder(nn.Module):
     def __init__(self, d_model=256):
         super().__init__()
-        self.type_embedding = nn.Embedding(5, d_model)  # 5 map element types
-        self.point_embedding = FourierEmbedding(input_dim=3, d_model=d_model)
-        
-        self.polyline_encoder = nn.TransformerEncoder(
-            nn.TransformerEncoderLayer(d_model=d_model, nhead=8, batch_first=True),
-            num_layers=2
+        self.point_encoder = nn.Sequential(
+            nn.Linear(3, d_model // 2), 
+            nn.ReLU(), 
+            nn.Linear(d_model // 2, d_model)
         )
-    
-    def forward(self, maps):
-        # maps: (B, M, 10, 4) - [x, y, direction, type]
-        B, M, P, _ = maps.shape
+        self.type_embed = nn.Embedding(8, d_model, padding_idx=0)  # Map polyline types
+
+    def forward(self, inputs):
+        """
+        Args:
+            inputs: [B, M, W, 4] - [x, y, direction, type]
+        """
+        # Point features
+        output = self.point_encoder(inputs[..., :3])  # [B, M, W, d_model]
+        output = torch.max(output, dim=-2).values  # Max pool over points: [B, M, d_model]
+
+        # Type embedding
+        polyline_type = inputs[:, :, 0, -1].long().clamp(0, 7)  # [B, M]
+        type_embed = self.type_embed(polyline_type)  # [B, M, d_model]
         
-        # Extract features
-        points = maps[..., :3]  # (B, M, 10, 3) - x, y, direction
-        map_type = maps[..., 3].long()  # (B, M, 10)
-        
-        # Embed
-        point_emb = self.point_embedding(points)
-        type_emb = self.type_embedding(map_type)
-        
-        combined = point_emb + type_emb  # (B, M, 10, d_model)
-        
-        # Flatten for transformer
-        combined_flat = combined.view(B * M, P, -1)
-        
-        # Encode each polyline
-        encoded = self.polyline_encoder(combined_flat)
-        
-        # Max pool over points
-        polyline_features = encoded.max(dim=1)[0]  # (B*M, d_model)
-        polyline_features = polyline_features.view(B, M, -1)
-        
-        return polyline_features
+        return output + type_embed
 
 
 class Encoder(nn.Module):
-    def __init__(self, config, d_model=256):
+    def __init__(self, layers=4):
         super().__init__()
-        self.agent_encoder = AgentEncoder(d_model)
-        self.map_encoder = MapEncoder(d_model)
+        self.agent_encoder = AgentEncoder()
+        self.map_encoder = MapEncoder()
+        self.relation_encoder = FourierEmbedding(input_dim=3)
         
-        # Cross-attention between agents and map
-        self.transformer_encoder = nn.TransformerEncoder(
-            nn.TransformerEncoderLayer(d_model=d_model, nhead=8, batch_first=True),
-            num_layers=config.get('encoder_layers', 4)
+        transformer_layer = nn.TransformerEncoderLayer(
+            d_model=256, nhead=8, dim_feedforward=1024, 
+            dropout=0.1, batch_first=True
         )
-    
-    def forward(self, batch):
-        hist_trajs = batch['hist_trajs']
-        hist_valid = batch['hist_valid']
-        maps = batch['maps']
+        self.transformer_encoder = nn.TransformerEncoder(
+            transformer_layer, num_layers=layers, 
+            enable_nested_tensor=False
+        )
+
+    def forward(self, inputs):
+        agents = inputs['hist_trajs']  # [B, N, T, 6]
+        agents_valid = inputs['hist_valid']  # [B, N, T]
+        maps = inputs['maps']  # [B, M, W, 4]
+
+        # Prepare mask for agent encoder (True = invalid for transformer)
+        agent_mask = agents_valid.logical_not()
+        agent_mask[:, :, 0] = False  # Ensure first timestep is always "valid"
         
-        # Encode agents
-        agent_features = self.agent_encoder(hist_trajs, hist_valid)  # (B, N, d_model)
+        # Encode
+        encoded_agents = self.agent_encoder(agents, agent_mask)  # [B, N, d_model]
+        encoded_maps = self.map_encoder(maps)  # [B, M, d_model]
+
+        # Relation encoding (positions relative to each element)
+        B, N = agents.shape[:2]
+        M = maps.shape[1]
         
-        # Encode map
-        map_features = self.map_encoder(maps)  # (B, M, d_model)
+        # Get current positions: [B, N, 3] and [B, M, 3]
+        agent_poses = agents[:, :, -1, :3]  # x, y, heading at last timestep
+        map_poses = maps[:, :, 0, :3]  # x, y, direction at first point
         
-        # Concatenate agents and map
-        B, N = agent_features.shape[:2]
-        M = map_features.shape[1]
+        # Combined poses for relation encoding: [B, N+M, 3]
+        all_poses = torch.cat([agent_poses, map_poses], dim=1)
         
-        combined = torch.cat([agent_features, map_features], dim=1)  # (B, N+M, d_model)
+        # Add small offset to prevent division issues
+        all_poses = all_poses + 1e-3
         
-        # Create mask (all agents and map elements are valid)
-        masks = torch.zeros(B, N + M, dtype=torch.bool, device=combined.device)
+        # Encode relations: [B, N+M, d_model]
+        encoded_relations = self.relation_encoder(all_poses)
         
-        # Global encoding with transformer
-        encodings = self.transformer_encoder(combined, src_key_padding_mask=masks)
+        # Combine encodings
+        combined = torch.cat([encoded_agents, encoded_maps], dim=1)  # [B, N+M, d_model]
         
-        # Split back into agent and map encodings
-        agent_encodings = encodings[:, :N]
-        map_encodings = encodings[:, N:]
+        # Mask: agents use validity at last timestep, maps always valid
+        agents_final_valid = agents_valid[:, :, -1]  # [B, N]
+        maps_valid = torch.ones(B, M, dtype=torch.bool, device=maps.device)
+        combined_mask = torch.cat([agents_final_valid, maps_valid], dim=-1)  # [B, N+M]
+        combined_mask = combined_mask.logical_not()  # Invert for transformer (True = invalid)
+        
+        # Global transformer encoding
+        encodings = self.transformer_encoder(combined, src_key_padding_mask=combined_mask)
         
         return {
-            'agent_encodings': agent_encodings,
-            'map_encodings': map_encodings
+            'encodings': encodings,
+            'masks': combined_mask,
+            'relation_encodings': encoded_relations,
+            'agents': agents,
+            'num_agents': N
         }
 
 
 class Predictor(nn.Module):
-    def __init__(self, config, d_model=256, num_modes=3, future_steps=80):
+    def __init__(self, layers=4, num_modes=3, future_steps=80):
         super().__init__()
-        self.num_modes = num_modes
-        self.future_steps = future_steps
+        self._num_agents = 5
+        self._num_modes = num_modes
+        self._future_steps = future_steps
         
-        # Mode-specific decoders
-        self.decoder = nn.TransformerDecoder(
-            nn.TransformerDecoderLayer(d_model=d_model, nhead=8, batch_first=True),
-            num_layers=config.get('decoder_layers', 4)
+        self.attention_layers = nn.ModuleList([CrossTransformer() for _ in range(layers)])
+        self.mode_embed = nn.Embedding(num_modes, 256)
+        self.register_buffer('mode_indices', torch.arange(num_modes).long())
+        
+        # Trajectory decoders
+        self.traj_decoder = nn.Sequential(
+            nn.Linear(256, 256), nn.ELU(), nn.Dropout(0.1),
+            nn.Linear(256, future_steps * 2)
+        )
+        self.score_decoder = nn.Sequential(
+            nn.Linear(256, 128), nn.ELU(), nn.Dropout(0.1),
+            nn.Linear(128, 1)
+        )
+        self.aux_traj_decoder = nn.Sequential(
+            nn.Linear(256, 256), nn.ELU(), nn.Dropout(0.1),
+            nn.Linear(256, future_steps * 2)
         )
         
-        # Prediction heads
-        self.traj_head = nn.Sequential(
-            nn.Linear(d_model, d_model),
-            nn.ReLU(),
-            nn.Linear(d_model, future_steps * 2)  # Predict x, y for each timestep
-        )
+    def forward(self, encoder_outputs):
+        encodings = encoder_outputs['encodings']  # [B, N+M, d_model]
+        masks = encoder_outputs['masks']  # [B, N+M]
+        relations = encoder_outputs['relation_encodings']  # [B, N+M, d_model]
+        agents = encoder_outputs['agents']  # [B, N, T, 6]
+        num_agents = encoder_outputs['num_agents']
         
-        self.score_head = nn.Linear(d_model, 1)
+        B = encodings.shape[0]
         
-        # Mode queries (learnable)
-        self.mode_queries = nn.Parameter(torch.randn(num_modes, d_model))
+        # Current positions for all agents
+        current_states = agents[:, :, -1, :2]  # [B, N, 2]
+        center_state = current_states[:, :1]  # [B, 1, 2] - just center agent
+        
+        # ========== Auxiliary Predictions (all agents) ==========
+        agent_encodings = encodings[:, :num_agents]  # [B, N, d_model]
+        aux_trajs = self.aux_traj_decoder(agent_encodings)
+        aux_trajs = aux_trajs.reshape(B, num_agents, self._future_steps, 2)
+        # IMPORTANT: Add current positions
+        aux_trajs = aux_trajs + current_states[:, :, None, :]
+        
+        outputs = {'aux_trajs': aux_trajs}
+        
+        # ========== Main Predictions (center agent, multi-modal) ==========
+        # Initialize query with center agent encoding + mode embeddings
+        center_encoding = encodings[:, :1]  # [B, 1, d_model]
+        mode_embeds = self.mode_embed(self.mode_indices)  # [Q, d_model]
+        query = center_encoding + mode_embeds[None, :, :]  # [B, Q, d_model]
+        
+        for i, layer in enumerate(self.attention_layers):
+            query_out = layer(query, encodings, relations, masks)
+            
+            # Decode trajectories
+            trajs = self.traj_decoder(query_out)  # [B, Q, future_steps*2]
+            trajs = trajs.reshape(B, self._num_modes, self._future_steps, 2)
+            
+            # FIX: Add current position to make predictions relative
+            trajs = trajs + center_state[:, :, None, :]  # [B, Q, T, 2]
+            
+            # Decode scores
+            scores = self.score_decoder(query_out).squeeze(-1)  # [B, Q]
+            
+            outputs[f"layer_{i}_trajs"] = trajs
+            outputs[f"layer_{i}_scores"] = scores
+            
+            # Update query with residual
+            query = query + query_out
+
+        return outputs
+
+
+class FourierEmbedding(nn.Module):
+    """Learnable Fourier features for continuous inputs."""
     
-    def forward(self, encoder_outputs, batch):
-        agent_encodings = encoder_outputs['agent_encodings']  # (B, N, d_model)
-        map_encodings = encoder_outputs['map_encodings']  # (B, M, d_model)
+    def __init__(self, input_dim, hidden_dim=256, num_freq_bands=64):
+        super().__init__()
+        self.input_dim = input_dim
+        self.hidden_dim = hidden_dim
+        self.num_freq_bands = num_freq_bands
+
+        # Learnable frequencies (more robust than fixed)
+        self.freqs = nn.Embedding(input_dim, num_freq_bands)
         
-        B, N, d_model = agent_encodings.shape
+        # Per-dimension MLPs
+        self.mlps = nn.ModuleList([
+            nn.Sequential(
+                nn.Linear(num_freq_bands * 2 + 1, hidden_dim),
+                nn.LayerNorm(hidden_dim),
+                nn.ReLU(inplace=True),
+                nn.Linear(hidden_dim, hidden_dim),
+            ) for _ in range(input_dim)
+        ])
         
-        # Expand mode queries for batch and agents
-        queries = self.mode_queries.unsqueeze(0).unsqueeze(0).expand(B, N, -1, -1)  # (B, N, K, d_model)
+        self.to_out = nn.Sequential(
+            nn.LayerNorm(hidden_dim),
+            nn.ReLU(inplace=True),
+            nn.Linear(hidden_dim, hidden_dim),
+        )
+
+    def forward(self, x):
+        """
+        Args:
+            x: [..., input_dim] continuous values
+        Returns:
+            [..., hidden_dim] embeddings
+        """
+        # Fourier features: [..., input_dim, num_freq_bands]
+        x_freq = x.unsqueeze(-1) * self.freqs.weight * 2 * torch.pi
         
-        # Flatten for decoding
-        queries_flat = queries.reshape(B * N, self.num_modes, d_model)
-        agent_flat = agent_encodings.unsqueeze(2).expand(-1, -1, self.num_modes, -1).reshape(B * N, self.num_modes, d_model)
+        # Sin/cos encoding with original value: [..., input_dim, num_freq_bands*2+1]
+        x_encoded = torch.cat([x_freq.cos(), x_freq.sin(), x.unsqueeze(-1)], dim=-1)
         
-        # Decode
-        memory = torch.cat([agent_encodings, map_encodings], dim=1)  # (B, N+M, d_model)
-        memory_flat = memory.unsqueeze(1).expand(-1, N, -1, -1).reshape(B * N, -1, d_model)
+        # Process each dimension and sum
+        outputs = []
+        for i in range(self.input_dim):
+            outputs.append(self.mlps[i](x_encoded[..., i, :]))
+        x_out = torch.stack(outputs, dim=0).sum(dim=0)
         
-        decoded = self.decoder(queries_flat, memory_flat)  # (B*N, K, d_model)
+        return self.to_out(x_out)
+
+
+class CrossTransformer(nn.Module):
+    """Cross-attention layer with relation encoding."""
+    
+    def __init__(self, heads=8, dim=256, dropout=0.1, d_ffn=1024):
+        super().__init__()
+        self.cross_attention = nn.MultiheadAttention(dim, heads, dropout, batch_first=True)
+        self.norm_1 = nn.LayerNorm(dim)
+        self.norm_2 = nn.LayerNorm(dim)
+        self.ffn = nn.Sequential(
+            nn.Linear(dim, d_ffn), 
+            nn.GELU(), 
+            nn.Dropout(dropout), 
+            nn.Linear(d_ffn, dim), 
+            nn.Dropout(dropout)
+        )
+
+    def forward(self, query, key, relations=None, mask=None):
+        """
+        Args:
+            query: [B, Q, dim] - mode queries
+            key: [B, N+M, dim] - scene encodings
+            relations: [B, N+M, dim] - positional relations
+            mask: [B, N+M] - True for invalid positions
+        """
+        # Add relations to key and value
+        if relations is not None:
+            key = key + relations
+        value = key
+
+        # Cross attention
+        attn_out, _ = self.cross_attention(query, key, value, key_padding_mask=mask)
+        attn_out = self.norm_1(attn_out)
         
-        # Predict trajectories
-        traj_flat = self.traj_head(decoded)  # (B*N, K, future_steps*2)
-        trajectories = traj_flat.view(B, N, self.num_modes, self.future_steps, 2)
+        # FFN with residual
+        output = self.norm_2(self.ffn(attn_out) + attn_out)
         
-        # Predict scores
-        score_flat = self.score_head(decoded).squeeze(-1)  # (B*N, K)
-        scores = score_flat.view(B, N, self.num_modes)
-        
-        return {
-            'trajectories': trajectories,
-            'scores': scores
-        }
+        return output

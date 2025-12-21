@@ -15,11 +15,11 @@ decoder_layers: 4  # Number of transformer decoder layers (try 4-8)
 
 # Training Params
 seed: 42
-batch_size: 32  # Adjust based on GPU memory (reduce if OOM)
+batch_size: 16  # Adjust based on GPU memory (reduce if OOM)
 num_workers: 12  # Number of data loading workers
 lr: 0.0001      # Learning rate
 weight_decay: 0.01  # Weight decay for regularization
-epochs: 5      # Total training epochs
+epochs: 30      # Total training epochs
 
 # Learning rate scheduler
 lr_warmup_step: 500   # Steps for learning rate warmup
