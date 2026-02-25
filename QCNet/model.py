@@ -5,6 +5,9 @@ Based on mentor's architecture with fixes for:
 2. Loss dilution from invalid timesteps
 3. Proper masking in all loss terms
 4. Better numerical stability
+5. [NEW] Fixed agent_mask forcing wrong timestep valid (line 307: 0→-1)
+6. [NEW] Increased prediction modes from 3 to 6 (Waymo standard)
+7. [NEW] Expanded MapEncoder embedding from 8 to 12
 """
 
 import torch
@@ -21,7 +24,10 @@ class MTR(pl.LightningModule):
         self.save_hyperparameters()
         self.cfg = cfg
         self.encoder = Encoder(cfg.get('encoder_layers', 4))
-        self.predictor = Predictor(cfg.get('decoder_layers', 4))
+        self.predictor = Predictor(
+            cfg.get('decoder_layers', 4),
+            num_modes=cfg.get('num_modalities', 6),
+        )
 
     def configure_optimizers(self):
         params_to_update = [p for p in self.parameters() if p.requires_grad]
@@ -263,7 +269,7 @@ class MapEncoder(nn.Module):
             nn.ReLU(), 
             nn.Linear(d_model // 2, d_model)
         )
-        self.type_embed = nn.Embedding(8, d_model, padding_idx=0)  # Map polyline types
+        self.type_embed = nn.Embedding(12, d_model, padding_idx=0)  # Map polyline types (expanded for Waymo)
 
     def forward(self, inputs):
         """
@@ -275,7 +281,7 @@ class MapEncoder(nn.Module):
         output = torch.max(output, dim=-2).values  # Max pool over points: [B, M, d_model]
 
         # Type embedding
-        polyline_type = inputs[:, :, 0, -1].long().clamp(0, 7)  # [B, M]
+        polyline_type = inputs[:, :, 0, -1].long().clamp(0, 11)  # [B, M]
         type_embed = self.type_embed(polyline_type)  # [B, M, d_model]
         
         return output + type_embed
@@ -304,7 +310,7 @@ class Encoder(nn.Module):
 
         # Prepare mask for agent encoder (True = invalid for transformer)
         agent_mask = agents_valid.logical_not()
-        agent_mask[:, :, 0] = False  # Ensure first timestep is always "valid"
+        agent_mask[:, :, -1] = False  # Ensure LAST (current) timestep is always valid
         
         # Encode
         encoded_agents = self.agent_encoder(agents, agent_mask)  # [B, N, d_model]
@@ -349,7 +355,7 @@ class Encoder(nn.Module):
 
 
 class Predictor(nn.Module):
-    def __init__(self, layers=4, num_modes=3, future_steps=80):
+    def __init__(self, layers=4, num_modes=6, future_steps=80):
         super().__init__()
         self._num_agents = 5
         self._num_modes = num_modes

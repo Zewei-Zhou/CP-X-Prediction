@@ -16,7 +16,7 @@ from lightning.pytorch.callbacks import ModelCheckpoint, LearningRateMonitor
 from lightning.pytorch.loggers import CSVLogger
 
 
-def train(cfg_file):
+def train(cfg_file, ckpt_path=None):
     print("=" * 60)
     print("MTR Training on Waymo Open Motion Dataset")
     print("=" * 60)
@@ -147,7 +147,7 @@ def train(cfg_file):
                 dirpath=output_path,
                 save_top_k=3,
                 save_last=True,
-                save_weights_only=True,
+                save_weights_only=False,
                 monitor='val/loss',
                 mode='min',
                 filename='epoch={epoch:02d}-val_loss={val/loss:.4f}',
@@ -166,7 +166,7 @@ def train(cfg_file):
     print("=" * 60 + "\n")
     
     try:
-        trainer.fit(model, train_loader, val_loader)
+        trainer.fit(model, train_loader, val_loader, ckpt_path=args.ckpt)
         print("\n" + "=" * 60)
         print("TRAINING COMPLETED!")
         print(f"Checkpoints saved to: {output_path}")
@@ -188,6 +188,7 @@ def train(cfg_file):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Train MTR on Waymo Dataset')
     parser.add_argument('--cfg', type=str, default='hparams.yaml', help='Config file path')
+    parser.add_argument('--ckpt', type=str, default=None, help='Resume from checkpoint')
     args = parser.parse_args()
     
     train(args.cfg)
