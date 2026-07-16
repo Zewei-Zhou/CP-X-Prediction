@@ -1,0 +1,8 @@
+{
+  "package_name": "mtr_prediction_msgs",
+  "non_idl_tuples": [
+    "/data/robert/CP-X-Prediction/ROS2-Code/mtr_prediction_msgs:msg/MarkerArrayHeader.msg",
+    "/data/robert/CP-X-Prediction/ROS2-Code/mtr_prediction_msgs:msg/PredictedTrajectory.msg",
+    "/data/robert/CP-X-Prediction/ROS2-Code/mtr_prediction_msgs:msg/ObjectPrediction.msg"
+  ]
+}

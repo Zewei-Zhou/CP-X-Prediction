@@ -1,0 +1,51 @@
+// generated from rosidl_adapter/resource/msg.idl.em
+// with input from mtr_prediction_msgs/msg/ObjectState.msg
+// generated code does not contain a copyright notice
+
+#include "mtr_prediction_msgs/msg/ObjectClassification.idl"
+#include "mtr_prediction_msgs/msg/ObjectReferencePoint.idl"
+#include "std_msgs/msg/Header.idl"
+
+module mtr_prediction_msgs {
+  module msg {
+    struct ObjectState {
+      std_msgs::msg::Header header;
+
+      @verbatim (language="comment", text=
+        "to ensure that the model_id is unique, all existing models an their corresponding IDs are listed here:" "\n"
+        "  EGO:           1" "\n"
+        "  EGORWS:        2" "\n"
+        "  ISCACTR:       16" "\n"
+        "  HEXAMOTION:    17" "\n"
+        "  TRAFFICLIGHT:  20")
+      uint8 model_id;
+
+      @verbatim (language="comment", text=
+        "IDs of the sensors having measured this state" "\n"
+        "In case of a fused object, this vector will have multiple entries")
+      sequence<uint64> sensor_id;
+
+      @verbatim (language="comment", text=
+        "continuous state vector (N)")
+      sequence<double> continuous_state;
+
+      @verbatim (language="comment", text=
+        "discrete state vector (M) for discrete int/bool/string quantitites")
+      sequence<int64> discrete_state;
+
+      @verbatim (language="comment", text=
+        "continuous state covariance matrix (N*N flattened)" "\n"
+        "CONTINUOUS_STATE_COVARIANCE_INVALID (-1): state value is invalid / not set" "\n"
+        "CONTINUOUS_STATE_COVARIANCE_UNKNOWN (max): state value is set, but covariance is unknown")
+      sequence<double> continuous_state_covariance;
+
+      @verbatim (language="comment", text=
+        "classification incl. probabilities")
+      sequence<mtr_prediction_msgs::msg::ObjectClassification> classifications;
+
+      @verbatim (language="comment", text=
+        "reference point for object position")
+      mtr_prediction_msgs::msg::ObjectReferencePoint reference_point;
+    };
+  };
+};

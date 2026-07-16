@@ -1,0 +1,22 @@
+// generated from rosidl_adapter/resource/msg.idl.em
+// with input from mtr_prediction_msgs/msg/ObjectStatePrediction.msg
+// generated code does not contain a copyright notice
+
+#include "mtr_prediction_msgs/msg/ObjectState.idl"
+
+module mtr_prediction_msgs {
+  module msg {
+    @verbatim (language="comment", text=
+      "Message for the predicted states of an object")
+    struct ObjectStatePrediction {
+      @verbatim (language="comment", text=
+        "probability of this prediction to occur")
+      double probability;
+
+      @verbatim (language="comment", text=
+        "Predicted states of the object" "\n"
+        "  Sorted ascending by time")
+      sequence<mtr_prediction_msgs::msg::ObjectState> states;
+    };
+  };
+};

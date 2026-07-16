@@ -1,0 +1,25 @@
+// generated from rosidl_adapter/resource/msg.idl.em
+// with input from mtr_prediction_msgs/msg/PredictedTrajectories.msg
+// generated code does not contain a copyright notice
+
+#include "mtr_prediction_msgs/msg/ObjectPrediction.idl"
+#include "sensor_msgs/msg/PointCloud2.idl"
+#include "std_msgs/msg/Header.idl"
+
+module mtr_prediction_msgs {
+  module msg {
+    @verbatim (language="comment", text=
+      "Predictions for all objects")
+    struct PredictedTrajectories {
+      std_msgs::msg::Header header;
+
+      @verbatim (language="comment", text=
+        "Array of predictions (one per tracked object)")
+      sequence<mtr_prediction_msgs::msg::ObjectPrediction> predictions;
+
+      @verbatim (language="comment", text=
+        "Optional: Map information used for prediction")
+      sensor_msgs::msg::PointCloud2 map_polylines;
+    };
+  };
+};

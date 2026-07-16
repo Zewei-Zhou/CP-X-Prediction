@@ -1,0 +1,54 @@
+// generated from rosidl_adapter/resource/msg.idl.em
+// with input from mtr_prediction_msgs/msg/TrackedObject.msg
+// generated code does not contain a copyright notice
+
+#include "geometry_msgs/msg/Pose.idl"
+#include "geometry_msgs/msg/Twist.idl"
+#include "geometry_msgs/msg/Vector3.idl"
+#include "mtr_prediction_msgs/msg/ObjectState.idl"
+#include "std_msgs/msg/Header.idl"
+
+module mtr_prediction_msgs {
+  module msg {
+    module TrackedObject_Constants {
+      const uint8 OBJECT_TYPE_UNKNOWN = 0;
+      const uint8 OBJECT_TYPE_VEHICLE = 1;
+      const uint8 OBJECT_TYPE_PEDESTRIAN = 2;
+      const uint8 OBJECT_TYPE_CYCLIST = 3;
+    };
+    @verbatim (language="comment", text=
+      "Single tracked object for motion prediction input")
+    struct TrackedObject {
+      std_msgs::msg::Header header;
+
+      @verbatim (language="comment", text=
+        "Object identification")
+      uint64 object_id;
+
+      @verbatim (language="comment", text=
+        "Same as ObjectState (1=ego, 16=vehicle, etc.)")
+      uint8 model_id;
+
+      @verbatim (language="comment", text=
+        "Current state" "\n"
+        "x, y, z, orientation")
+      geometry_msgs::msg::Pose pose;
+
+      @verbatim (language="comment", text=
+        "linear and angular velocity")
+      geometry_msgs::msg::Twist velocity;
+
+      @verbatim (language="comment", text=
+        "length, width, height")
+      geometry_msgs::msg::Vector3 size;
+
+      @verbatim (language="comment", text=
+        "Object classification")
+      uint8 object_type;
+
+      @verbatim (language="comment", text=
+        "Historical trajectory (10 past states at 10Hz = 1 second history)")
+      sequence<mtr_prediction_msgs::msg::ObjectState> track_history;
+    };
+  };
+};

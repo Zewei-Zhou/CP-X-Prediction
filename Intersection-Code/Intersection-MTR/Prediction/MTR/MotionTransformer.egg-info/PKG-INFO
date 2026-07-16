@@ -1,0 +1,7 @@
+Metadata-Version: 2.1
+Name: MotionTransformer
+Version: 0.1.0+0
+Summary: Motion Transformer (MTR), published at NeurIPS 2022
+Author: Shaoshuai Shi
+Author-email: shaoshuaics@gmail.com
+License: Apache License 2.0

@@ -1,0 +1,26 @@
+// generated from rosidl_adapter/resource/msg.idl.em
+// with input from mtr_prediction_msgs/msg/ObjectList.msg
+// generated code does not contain a copyright notice
+
+#include "mtr_prediction_msgs/msg/Object.idl"
+#include "std_msgs/msg/Header.idl"
+
+module mtr_prediction_msgs {
+  module msg {
+    @verbatim (language="comment", text=
+      "Message for a list of objects")
+    struct ObjectList {
+      @verbatim (language="comment", text=
+        "header" "\n"
+        "frame_id of the reference frame (common: \"base_link\", \"map\",...), and timestamp" "\n"
+        "The frame is where the position and orientation is published." "\n"
+        "Probably this will be in vehicle or global coordinates and there should be a transform in between" "\n"
+        "The timestamp is the time of the newest sample")
+      std_msgs::msg::Header header;
+
+      @verbatim (language="comment", text=
+        "List of objects")
+      sequence<mtr_prediction_msgs::msg::Object> objects;
+    };
+  };
+};
