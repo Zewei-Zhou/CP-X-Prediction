@@ -1,0 +1,34 @@
+// generated from rosidl_adapter/resource/msg.idl.em
+// with input from mtr_prediction_msgs/msg/Object.msg
+// generated code does not contain a copyright notice
+
+#include "mtr_prediction_msgs/msg/ObjectState.idl"
+#include "mtr_prediction_msgs/msg/ObjectStatePrediction.idl"
+
+module mtr_prediction_msgs {
+  module msg {
+    @verbatim (language="comment", text=
+      "Message for the state of an object")
+    struct Object {
+      @verbatim (language="comment", text=
+        "Lifetime ID of the object")
+      uint64 id;
+
+      @verbatim (language="comment", text=
+        "Existence probability of the object [0,1]")
+      double existence_probability;
+
+      @verbatim (language="comment", text=
+        "Motion state estimate of the object")
+      mtr_prediction_msgs::msg::ObjectState state;
+
+      @verbatim (language="comment", text=
+        "History of the object's states")
+      sequence<mtr_prediction_msgs::msg::ObjectState> state_history;
+
+      @verbatim (language="comment", text=
+        "Prediction of the object state")
+      sequence<mtr_prediction_msgs::msg::ObjectStatePrediction> state_predictions;
+    };
+  };
+};

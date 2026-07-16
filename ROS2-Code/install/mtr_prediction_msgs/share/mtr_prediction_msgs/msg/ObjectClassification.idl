@@ -1,0 +1,76 @@
+// generated from rosidl_adapter/resource/msg.idl.em
+// with input from mtr_prediction_msgs/msg/ObjectClassification.msg
+// generated code does not contain a copyright notice
+
+
+module mtr_prediction_msgs {
+  module msg {
+    module ObjectClassification_Constants {
+      @verbatim (language="comment", text=
+        "unknown classification")
+      const uint8 UNCLASSIFIED = 0;
+      @verbatim (language="comment", text=
+        "persons on foot (walking, standing, running, sitting, lying) without a dedicated mobility device such as a wheelchair or stroller")
+      const uint8 PEDESTRIAN = 1;
+      @verbatim (language="comment", text=
+        "bicycles and their riders")
+      const uint8 BICYCLE = 2;
+      @verbatim (language="comment", text=
+        "--- DEPRECATED; USE MOTORCYCLE")
+      const uint8 MOTORBIKE = 3;
+      @verbatim (language="comment", text=
+        "motorized two-wheel vehicles and their riders")
+      const uint8 MOTORCYCLE = 3;
+      @verbatim (language="comment", text=
+        "standard passenger cars for personal transport")
+      const uint8 CAR = 4;
+      @verbatim (language="comment", text=
+        "--- DEPRECATED; USE UTILITY")
+      const uint8 TRUCK = 5;
+      @verbatim (language="comment", text=
+        "commercial & utility vehicles like trucks, trailers, construction vehicles, agricultural/utility vehicles, and other large road vehicles")
+      const uint8 UTILITY = 5;
+      @verbatim (language="comment", text=
+        "--- DEPRECATED; USE CAR")
+      const uint8 VAN = 6;
+      @verbatim (language="comment", text=
+        "vehicles designed to carry many passengers such as urban buses, articulated buses, and bus trailers")
+      const uint8 BUS = 7;
+      @verbatim (language="comment", text=
+        "animals that may influence traffic")
+      const uint8 ANIMAL = 8;
+      @verbatim (language="comment", text=
+        "--- DEPRECATED")
+      const uint8 ROAD_OBSTACLE = 9;
+      @verbatim (language="comment", text=
+        "--- DEPRECATED; USE UTILITY")
+      const uint8 TRAIN = 10;
+      @verbatim (language="comment", text=
+        "--- DEPRECATED; USE UTILITY")
+      const uint8 TRAILER = 11;
+      @verbatim (language="comment", text=
+        "vulnerable road users that typically move on sidewalks such as wheelchairs and strollers, except pedestrians")
+      const uint8 VRU = 12;
+      @verbatim (language="comment", text=
+        "micro-mobility devices typically used on bike lanes or the road (e.g., kick-scooters, Segways, hoverboards) with their riders")
+      const uint8 MICRO = 13;
+      @verbatim (language="comment", text=
+        "--- DEPRECATED; USE CAR")
+      const uint8 CAR_UNION = 50;
+      @verbatim (language="comment", text=
+        "--- DEPRECATED; USE UTILITY")
+      const uint8 TRUCK_UNION = 51;
+      @verbatim (language="comment", text=
+        "--- DEPRECATED; USE MULTIPLE PROBABILISTIC CLASSIFICATIONS")
+      const uint8 BIKE_UNION = 52;
+      @verbatim (language="comment", text=
+        "definitely none of the other defined classes")
+      const uint8 UNKNOWN = 100;
+    };
+    struct ObjectClassification {
+      uint8 type;
+
+      double probability;
+    };
+  };
+};

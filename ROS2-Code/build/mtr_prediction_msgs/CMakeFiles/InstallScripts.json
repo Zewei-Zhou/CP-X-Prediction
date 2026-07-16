@@ -1,0 +1,9 @@
+{
+	"InstallScripts" : 
+	[
+		"/data/robert/CP-X-Prediction/ROS2-Code/build/mtr_prediction_msgs/cmake_install.cmake",
+		"/data/robert/CP-X-Prediction/ROS2-Code/build/mtr_prediction_msgs/mtr_prediction_msgs__py/cmake_install.cmake",
+		"/data/robert/CP-X-Prediction/ROS2-Code/build/mtr_prediction_msgs/mtr_prediction_msgs__rs/cmake_install.cmake"
+	],
+	"Parallel" : false
+}

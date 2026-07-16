@@ -1,0 +1,6 @@
+msg/MarkerArrayHeader.idl
+msg/MarkerArrayHeader.msg
+msg/ObjectPrediction.idl
+msg/ObjectPrediction.msg
+msg/PredictedTrajectory.idl
+msg/PredictedTrajectory.msg

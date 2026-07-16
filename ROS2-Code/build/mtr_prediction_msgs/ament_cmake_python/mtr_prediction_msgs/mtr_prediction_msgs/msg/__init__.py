@@ -1,0 +1,11 @@
+from mtr_prediction_msgs.msg._object import Object  # noqa: F401
+from mtr_prediction_msgs.msg._object_classification import ObjectClassification  # noqa: F401
+from mtr_prediction_msgs.msg._object_list import ObjectList  # noqa: F401
+from mtr_prediction_msgs.msg._object_prediction import ObjectPrediction  # noqa: F401
+from mtr_prediction_msgs.msg._object_reference_point import ObjectReferencePoint  # noqa: F401
+from mtr_prediction_msgs.msg._object_state import ObjectState  # noqa: F401
+from mtr_prediction_msgs.msg._object_state_prediction import ObjectStatePrediction  # noqa: F401
+from mtr_prediction_msgs.msg._predicted_trajectories import PredictedTrajectories  # noqa: F401
+from mtr_prediction_msgs.msg._predicted_trajectory import PredictedTrajectory  # noqa: F401
+from mtr_prediction_msgs.msg._tracked_object import TrackedObject  # noqa: F401
+from mtr_prediction_msgs.msg._tracked_object_array import TrackedObjectArray  # noqa: F401

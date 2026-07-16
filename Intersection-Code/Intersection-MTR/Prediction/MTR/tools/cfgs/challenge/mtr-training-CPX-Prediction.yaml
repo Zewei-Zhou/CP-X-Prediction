@@ -13,7 +13,7 @@ DATA_CONFIG:
         'test': 'processed_scenarios_val_infos.pkl'
     }
 
-    # training for every 2nd frame, which equates to training using 0.40 data
+    # training for every 2nd frame, which equates to training using 0.50
     SAMPLE_INTERVAL: {
         'train': 2, 
         'test': 1

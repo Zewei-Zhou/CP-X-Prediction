@@ -1,0 +1,19 @@
+{
+	"backtraceGraph" : 
+	{
+		"commands" : [],
+		"files" : [],
+		"nodes" : []
+	},
+	"codemodelVersion" : 
+	{
+		"major" : 2,
+		"minor" : 10
+	},
+	"installers" : [],
+	"paths" : 
+	{
+		"build" : "mtr_prediction_msgs__py",
+		"source" : "/data/robert/CP-X-Prediction/ROS2-Code/build/mtr_prediction_msgs/mtr_prediction_msgs__py"
+	}
+}

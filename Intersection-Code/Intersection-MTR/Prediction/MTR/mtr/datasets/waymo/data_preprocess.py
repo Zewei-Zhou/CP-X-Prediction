@@ -249,6 +249,19 @@ def create_infos_from_protos(raw_data_path, output_path, num_workers=16):
         pickle.dump(val_infos, f)
     print('----------------Waymo info val file is saved to %s----------------' % val_filename)
     
+    
+    test_infos = get_infos_from_protos(
+        data_path=os.path.join(raw_data_path, 'testing'),
+        output_path=os.path.join(output_path, 'processed_scenarios_testing'),
+        num_workers=num_workers
+    )
+    test_filename = os.path.join(output_path, 'processed_scenarios_test_infos.pkl')
+    with open(test_filename, 'wb') as f:
+        pickle.dump(test_infos, f)
+    print('----------------Waymo info test file is saved to %s----------------' % test_filename)
+    
+    
+    
 
 if __name__ == '__main__':
     create_infos_from_protos(

@@ -112,7 +112,7 @@ def main():
     args, cfg = parse_config()
     if args.launcher == 'none':
         dist_train = False
-        total_gpus = 1
+        # total_gpus = 1
         args.without_sync_bn = True
     else:
         if args.local_rank is None:
@@ -121,7 +121,7 @@ def main():
             args.tcp_port, args.local_rank, backend='nccl'
         )
         dist_train = True
-    total_gpus = 5
+    total_gpus = 1
     if args.batch_size is None:
         args.batch_size = cfg.OPTIMIZATION.BATCH_SIZE_PER_GPU
     else:

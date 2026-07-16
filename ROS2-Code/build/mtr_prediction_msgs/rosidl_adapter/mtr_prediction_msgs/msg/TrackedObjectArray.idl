@@ -1,0 +1,18 @@
+// generated from rosidl_adapter/resource/msg.idl.em
+// with input from mtr_prediction_msgs/msg/TrackedObjectArray.msg
+// generated code does not contain a copyright notice
+
+#include "mtr_prediction_msgs/msg/TrackedObject.idl"
+#include "std_msgs/msg/Header.idl"
+
+module mtr_prediction_msgs {
+  module msg {
+    @verbatim (language="comment", text=
+      "Array of tracked objects")
+    struct TrackedObjectArray {
+      std_msgs::msg::Header header;
+
+      sequence<mtr_prediction_msgs::msg::TrackedObject> objects;
+    };
+  };
+};
