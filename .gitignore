@@ -19,6 +19,10 @@
 *.ckpt
 *.pt
 *.pth
+
+# Exception: released model checkpoints under checkpoints/ are tracked via Git LFS
+# (see .gitattributes). This negation must come after the *.pth rule above.
+!checkpoints/*.pth
 *.keras
 *.onnx
 model_weights/
