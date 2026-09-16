@@ -7,10 +7,10 @@ Localization and Local Movement Refinement"*, NeurIPS 2022
 Intersection scenarios and V2X-PnP cooperative data, plus a ROS 2 node that runs the
 trained model in real time on live/replayed sensor streams.
 
-> **New to this repo? Read the [Quick start](#quick-start) and then the
-> [Known issues / must-fix before running](#known-issues--must-fix-before-running)
-> section first — the checked-in configs point at data paths that no longer exist on
-> this machine, so nothing will run until you repoint `DATA_ROOT`.**
+> **New to this repo?** On the current lab machine the datasets are already in place and
+> the checked-in configs already point at them (see [Datasets](#datasets)), so training,
+> finetuning, and testing run out of the box once the conda env is built. If you move to a
+> different machine, update each config's `DATA_ROOT` to wherever you put the data.
 
 ---
 
@@ -66,8 +66,8 @@ pip install torch torchvision --index-url https://download.pytorch.org/whl/cu118
 pip install -r requirements.txt
 python setup.py develop            # builds the knn / attention CUDA ops
 
-# 2. point the config at the real data location (see "Known issues")
-#    edit DATA_ROOT in tools/cfgs/challenge/mtr-training-CPX-Prediction.yaml
+# 2. (only if you moved the data) update DATA_ROOT in the config you plan to run.
+#    On the current lab machine the configs already point at the data — skip this.
 
 # 3. train / finetune / test from the tools/ directory
 cd tools
@@ -139,8 +139,14 @@ export PYTHONPATH="<repo>/Intersection-Code/Intersection-MTR/Prediction/MTR:${PY
 
 | Data | Path on disk | Status |
 |------|--------------|--------|
-| CP-X / Waymo processed scenarios | `/data2/CP-X/data/waymo/` | `processed_scenarios_training/` present (33,011 scenarios). **No validation split and no `*_infos.pkl` yet** — see below. |
+| CP-X / Waymo processed scenarios (pretraining) | `/data/dataset/CP-X/data/waymo/` | **Complete and ready.** 486,995 train + 44,097 val scenarios, both `*_infos.pkl` present. This is what `mtr-training/testing-CPX-Prediction.yaml` point at. |
+| V2X-PnP processed scenarios (finetuning) | `/data/dataset/waymo_finetune_v2xpnp_processed/` | **Complete and ready.** train/val/test splits + all three `*_infos.pkl`. This is what `mtr-finetuning-V2XPNP.yaml` points at. `..._both_maps_processed/` and `..._full_map_processed/` are the map-coverage variants. |
 | Annotation / perception / validation-GT | `Intersection-Code/Intersection-MTR/Data/` | raw project data |
+
+> **Note on `/data2/CP-X/data/waymo`.** This is an **incomplete partial copy** of the
+> CP-X dataset — only `processed_scenarios_training/` with ~33k of the 486,995 scenarios,
+> and no validation split or `*_infos.pkl`. Do **not** point configs at it; use the
+> canonical `/data/dataset/CP-X/data/waymo` above (where the configs already point).
 
 ### Expected structure (what a config's `DATA_ROOT` must contain)
 
@@ -155,9 +161,9 @@ export PYTHONPATH="<repo>/Intersection-Code/Intersection-MTR/Prediction/MTR:${PY
 ```
 
 The `*_infos.pkl` index files and the validation split are produced by the preprocessing
-step below. On this machine only the training split currently exists, so **you must run
-preprocessing to generate the validation split + both info files before training/testing
-end-to-end.**
+step below. **For the datasets on the current machine this is already done** — both the
+CP-X and V2X-PnP `DATA_ROOT`s above already contain the splits and info files, so you only
+need the preprocessing step when building a *new* dataset from raw scenario protos.
 
 ### Preprocessing raw scenarios → MTR format
 
@@ -277,26 +283,24 @@ scripts in `Intersection-Code/Intersection-MTR/Test_Pipeline/`
 
 `.pth` files are git-ignored (see `.gitignore`), so checkpoints are **not** version
 controlled — copy them explicitly when moving machines. To produce an **updated**
-finetuned checkpoint, run step 2 above with `--ckpt` pointing at this file once the data
-paths are fixed (see below).
+finetuned checkpoint, run [step 2](#2-finetune-on-v2x-pnp) with `--ckpt` pointing at this
+file; the data it needs is already in place, so nothing else has to be set up first.
 
 ---
 
-## Known issues / must-fix before running
+## Notes / gotchas
 
-1. **`DATA_ROOT` points at stale paths.** Every config in `tools/cfgs/challenge/` points
-   at `/data/dataset/...` (e.g. `mtr-training-CPX-Prediction.yaml` →
-   `/data/dataset/CP-X/data/waymo`), but on this machine the data actually lives at
-   **`/data2/CP-X/data/waymo`**. Edit the `DATA_ROOT:` line of whichever config you run,
-   or symlink the expected path. The old scratch notes in `tools/temp.txt` and
-   `tools/test.txt`, and `ROS2-Code/run_env.sh`, reference an even older
-   `/data/robert/CP-X-Prediction/...` layout — ignore those absolute paths.
+1. **Use the canonical data paths — not the `/data2` copy.** The configs already point at
+   the complete datasets under `/data/dataset/...`. `/data2/CP-X/data/waymo` is only a
+   partial copy (training subset, no val split, no info files); pointing a config at it
+   will fail or silently train on a fraction of the data. If you run on a different
+   machine, set each config's `DATA_ROOT` to a directory matching the
+   [expected structure](#expected-structure-what-a-configs-data_root-must-contain).
 
-2. **Validation split + info files are missing.** `/data2/CP-X/data/waymo/` currently has
-   only `processed_scenarios_training/`. Training/testing also need
-   `processed_scenarios_validation/`, `processed_scenarios_training_infos.pkl`, and
-   `processed_scenarios_val_infos.pkl`. Generate them with the
-   [preprocessing step](#preprocessing-raw-scenarios--mtr-format).
+2. **Stale absolute paths in scratch files.** `tools/temp.txt`, `tools/test.txt`, and
+   `ROS2-Code/run_env.sh` contain example commands with an older
+   `/data/robert/CP-X-Prediction/...` layout. They are illustrative only — update the
+   paths for your checkout before using them.
 
 3. **CUDA ops must be built for your torch/CUDA.** If you see import errors for
    `mtr.ops.knn` or `mtr.ops.attention`, re-run `python setup.py develop` inside the same
