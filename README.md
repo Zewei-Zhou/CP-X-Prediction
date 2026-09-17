@@ -304,6 +304,82 @@ Bare `.pth` files elsewhere are git-ignored (see `.gitignore`); only the two und
 
 ---
 
+## Evaluation results
+
+Finetuned (`checkpoint_epoch_30.pth`) vs. pretrained (`checkpoint_epoch_25.pth`), both
+evaluated with the same command on the **same V2X-PnP validation split**:
+
+```bash
+cd MTR_ROOT/tools
+python test.py --cfg_file cfgs/challenge/mtr-testing-finetuning-V2XPNP.yaml \
+  --ckpt <checkpoint>.pth --batch_size 1
+```
+
+Split: 12 scenes, 733 predicted agents (349 vehicle, 384 pedestrian, 0 cyclist); K = 6
+modes; 8 s horizon. Evaluation always uses **all** agents (the training-only memory cap
+does not apply), so these numbers are directly comparable.
+
+**Vehicle** (349 agents)
+
+| Metric | Pretrained (ep25) | Finetuned (ep30) | Change |
+|--------|------------------:|-----------------:|-------:|
+| minADE (m) ↓ | 2.020 | **1.861** | −8% |
+| minFDE (m) ↓ | 4.916 | **3.146** | −36% |
+| MissRate ↓ | 0.822 | **0.262** | −68% |
+| mAP ↑ | 0.036 | **0.227** | ≈6× |
+
+**Pedestrian** (384 agents)
+
+| Metric | Pretrained (ep25) | Finetuned (ep30) | Change |
+|--------|------------------:|-----------------:|-------:|
+| minADE (m) ↓ | 0.787 | **0.726** | −8% |
+| minFDE (m) ↓ | 1.501 | **1.334** | −11% |
+| MissRate ↓ | **0.244** | 0.265 | +9% (worse) |
+| mAP ↑ | 0.163 | **0.210** | +29% |
+
+**mAP by horizon** (Waymo measures at 3 s / 5 s / 8 s):
+
+| Class | Model | mAP @3 s | mAP @5 s | mAP @8 s |
+|-------|-------|---------:|---------:|---------:|
+| Vehicle | pretrained | 0.064 | 0.025 | 0.018 |
+| Vehicle | **finetuned** | **0.222** | **0.228** | **0.230** |
+| Pedestrian | pretrained | 0.152 | 0.165 | 0.173 |
+| Pedestrian | **finetuned** | **0.222** | **0.206** | **0.203** |
+
+Finetuning on V2X-PnP gives a large gain for vehicles (the CP-X pretrain barely handled
+intersection vehicle motion — 82% miss rate → 26%) and a moderate gain for pedestrians,
+with a small pedestrian miss-rate regression.
+
+### What each metric means
+
+All are standard Waymo Motion Prediction metrics, computed over the K = 6 predicted modes
+per agent for the 8 s future:
+
+- **minADE** — *minimum Average Displacement Error* (meters, lower is better). Take the one
+  of the 6 modes closest to ground truth, then average the point-by-point L2 distance along
+  the whole trajectory. "How far off is the best of the 6 guesses, on average."
+- **minFDE** — *minimum Final Displacement Error* (meters, lower is better). Same best-of-6,
+  but only the **endpoint** error at the prediction horizon. "How far off is the best
+  guess's final position."
+- **MissRate** — fraction of agents (lower is better) for which **none** of the 6 modes'
+  endpoints land within Waymo's lateral/longitudinal threshold of the true endpoint (i.e. a
+  "miss").
+- **mAP** — *mean Average Precision* (higher is better). Treats prediction like detection: a
+  mode counts as a true positive only if it is within threshold **and** ranked confidently;
+  AP is computed over confidence-ranked predictions and averaged across trajectory-shape
+  buckets. Rewards putting **high confidence on the correct mode**, not merely having a good
+  trajectory somewhere among the 6.
+- **OverlapRate** — fraction of predicted trajectories that collide with another agent
+  (lower is better). Reported in the saved results, not tabled above.
+
+> **Note on the aggregate `Avg` row.** `test.py` also prints an overall `Avg` with negative
+> mAP/MissRate. That is a harness artifact, **not** a real score: this val split contains no
+> cyclists, so every cyclist metric is the sentinel `-1.0000`, and the evaluator averages
+> that sentinel into the 3-class mean. Only the per-class Vehicle/Pedestrian numbers above
+> are meaningful.
+
+---
+
 ## Notes / gotchas
 
 1. **Use the canonical data paths — not the `/data2` copy.** The configs already point at
