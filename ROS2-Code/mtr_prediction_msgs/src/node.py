@@ -2,11 +2,16 @@ import sys
 import os
 import math
 import re
+from pathlib import Path
 import rclpy
 from rclpy.node import Node
 import torch
 import numpy as np
 from collections import deque
+
+# Repo layout: <repo>/ROS2-Code/mtr_prediction_msgs/src/node.py -> parents[3] == <repo>
+REPO_ROOT = Path(__file__).resolve().parents[3]
+MTR_ROOT = REPO_ROOT / "Intersection-Code" / "Intersection-MTR" / "Prediction" / "MTR"
 
 from mtr_prediction_msgs.msg import MarkerArrayHeader, PredictedTrajectory,  ObjectPrediction
 from geometry_msgs.msg import PoseStamped, TwistStamped
@@ -18,8 +23,11 @@ class MTRPredictionNode(Node):
     def __init__(self):
         super().__init__('mtr_prediction_node')
         
-        # 1. Load MTR Configuration
-        cfg_file = "/data/robert/CP-X-Prediction/Intersection-Code/Intersection-MTR/Prediction/MTR/tools/cfgs/challenge/mtr-finetuning-V2XPNP.yaml"
+        # 1. Load MTR Configuration (override with MTR_CFG env var if needed)
+        cfg_file = os.environ.get(
+            "MTR_CFG",
+            str(MTR_ROOT / "tools" / "cfgs" / "challenge" / "mtr-finetuning-V2XPNP.yaml"),
+        )
         cfg_from_yaml_file(cfg_file, cfg)
         
         # 2. Initialize Model
@@ -27,8 +35,13 @@ class MTRPredictionNode(Node):
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.model = MotionTransformer(config=cfg.MODEL).to(self.device)
         
-        # 3. Load Weights
-        weights_path = "/data/robert/CP-X-Prediction/Intersection-Code/Intersection-MTR/Prediction/MTR/output/challenge/mtr-training-CPX-Prediction/good_ckpt/checkpoint_epoch_25.pth"
+        # 3. Load Weights. Defaults to the V2X-PnP finetuned checkpoint; override with
+        #    MTR_CKPT env var (e.g. to use the CP-X pretrained checkpoint instead).
+        weights_path = os.environ.get(
+            "MTR_CKPT",
+            str(MTR_ROOT / "output" / "challenge" / "mtr-finetuning-V2XPNP" / "default" / "ckpt" / "checkpoint_epoch_30.pth"),
+        )
+        self.get_logger().info(f"Loading weights from {weights_path}")
         self.model.load_params_with_optimizer(weights_path, to_cpu=False, logger=self.get_logger())
         self.model.eval() # CRITICAL: Put model in inference mode
         

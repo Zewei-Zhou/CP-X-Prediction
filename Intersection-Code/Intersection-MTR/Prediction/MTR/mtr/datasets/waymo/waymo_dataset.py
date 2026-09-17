@@ -89,6 +89,21 @@ class WaymoDataset(DatasetTemplate):
         track_infos = info['track_infos']
 
         track_index_to_predict = np.array(info['tracks_to_predict']['track_index'])
+
+        # Memory cap for very dense scenes (config-gated, TRAINING ONLY). MTR predicts
+        # for every agent in `track_index_to_predict` simultaneously and replicates the
+        # per-scene map features per center object, so peak GPU memory scales with the
+        # number of agents. Some V2X-PnP scenes have up to ~145 agents, which OOMs a
+        # 46GB GPU even at batch_size 1. When MAX_NUM_CENTER_OBJECTS_TRAIN is set we
+        # randomly subsample the agents per step during training (re-sampled every epoch,
+        # so the model still sees all agents over the course of training). Eval/inference
+        # (self.training == False) is never capped, so metrics use all agents.
+        max_center_objects = self.dataset_cfg.get('MAX_NUM_CENTER_OBJECTS_TRAIN', None)
+        if self.training and max_center_objects is not None and len(track_index_to_predict) > max_center_objects:
+            selected = np.random.choice(len(track_index_to_predict), size=max_center_objects, replace=False)
+            selected.sort()
+            track_index_to_predict = track_index_to_predict[selected]
+
         obj_types = np.array(track_infos['object_type'])
         obj_ids = np.array(track_infos['object_id'])
         obj_trajs_full = track_infos['trajs']  # (num_objects, num_timestamp, 10)

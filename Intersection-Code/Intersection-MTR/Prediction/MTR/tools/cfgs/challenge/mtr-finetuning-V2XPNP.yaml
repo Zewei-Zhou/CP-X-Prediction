@@ -14,11 +14,16 @@ DATA_CONFIG:
     }
 
     SAMPLE_INTERVAL: {
-        'train': 1, 
+        'train': 1,
         'test': 1
     }
 
-    INFO_FILTER_DICT: 
+    # Cap agents-per-scene during TRAINING only, to fit dense V2X-PnP scenes (up to ~145
+    # agents) on a 46GB GPU. Eval/inference is never capped. Remove this (or raise it) if
+    # training on an 80GB GPU. See waymo_dataset.py for details.
+    MAX_NUM_CENTER_OBJECTS_TRAIN: 32
+
+    INFO_FILTER_DICT:
         filter_info_by_object_type: *object_type
 
    # for map feature encoding

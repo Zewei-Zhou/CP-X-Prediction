@@ -144,7 +144,8 @@ class BagPlayer(Node):
 
 
 def main():
-    bag = sys.argv[1] if len(sys.argv) > 1 else '/data/robert/CP-X-Prediction/ROS2-Code/rosbag/output.bag'
+    _default_bag = str(Path(__file__).resolve().parents[2] / 'rosbag' / 'output.bag')
+    bag = sys.argv[1] if len(sys.argv) > 1 else _default_bag
     rate = float(sys.argv[2]) if len(sys.argv) > 2 else 1.0
     rclpy.init()
     node = BagPlayer(bag, rate=rate)

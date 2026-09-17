@@ -240,18 +240,32 @@ Result: `output/challenge/mtr-training-CPX-Prediction/default/ckpt/checkpoint_ep
 
 ### 2. Finetune on V2X-PnP
 
-Start from a pretrained CP-X checkpoint via `--ckpt`:
+Load the pretrained CP-X weights with `--pretrained_model` (weights only, fresh
+optimizer, trains the full `--epochs` — this is how the released finetune was produced;
+do **not** use `--ckpt`, which would *resume* from epoch 25 and only train 5 more epochs):
+
 ```bash
 cd MTR_ROOT/tools
 python train.py \
   --cfg_file cfgs/challenge/mtr-finetuning-V2XPNP.yaml \
-  --batch_size 6 \
+  --batch_size 1 \
   --epochs 30 \
-  --ckpt <path>/checkpoint_epoch_25.pth
+  --pretrained_model ../output/checkpoint_epoch_25.pth \
+  --not_eval_with_train
 ```
 
+Result: `output/challenge/mtr-finetuning-V2XPNP/default/ckpt/checkpoint_epoch_30.pth`.
 A ready-to-use pretrained checkpoint is included at
 `MTR_ROOT/output/checkpoint_epoch_25.pth` (see [Checkpoints](#checkpoints)).
+
+> **GPU memory.** V2X-PnP scenes are dense (up to ~145 agents predicted at once), and MTR
+> processes all of a scene's agents simultaneously, so a single scene needs >44 GB in
+> fp32 — it OOMs a 46 GB GPU at any batch size. Two ways to run it:
+> - **80 GB GPU (A100/H100):** run as-is at `--batch_size 1`, no other changes.
+> - **≤48 GB GPU (e.g. L40S):** set `MAX_NUM_CENTER_OBJECTS_TRAIN` in the finetune config
+>   (default `32`). This randomly subsamples agents-per-scene **during training only**
+>   (re-sampled each epoch; eval/inference always use all agents), which drops peak memory
+>   to ~13 GB. The released `checkpoint_epoch_30.pth` was finetuned this way on an L40S.
 
 ### 3. Test / evaluate
 
@@ -277,14 +291,16 @@ scripts in `Intersection-Code/Intersection-MTR/Test_Pipeline/`
 
 ## Checkpoints
 
+Both are committed under `checkpoints/` via **Git LFS** (run `git lfs pull` after cloning):
+
 | Checkpoint | Path | What it is |
 |------------|------|------------|
-| `checkpoint_epoch_25.pth` | `MTR_ROOT/output/checkpoint_epoch_25.pth` | CP-X pretrained model — the starting point for V2X-PnP finetuning. |
+| `checkpoint_epoch_25.pth` | `checkpoints/checkpoint_epoch_25.pth` | CP-X pretrained model — the starting point for V2X-PnP finetuning. |
+| `checkpoint_epoch_30.pth` | `checkpoints/checkpoint_epoch_30.pth` | V2X-PnP finetuned model (from `checkpoint_epoch_25` via [step 2](#2-finetune-on-v2x-pnp), `MAX_NUM_CENTER_OBJECTS_TRAIN=32` on an L40S). The ROS 2 node loads this by default. |
 
-`.pth` files are git-ignored (see `.gitignore`), so checkpoints are **not** version
-controlled — copy them explicitly when moving machines. To produce an **updated**
-finetuned checkpoint, run [step 2](#2-finetune-on-v2x-pnp) with `--ckpt` pointing at this
-file; the data it needs is already in place, so nothing else has to be set up first.
+Bare `.pth` files elsewhere are git-ignored (see `.gitignore`); only the two under
+`checkpoints/` are tracked. To regenerate the finetuned checkpoint, run
+[step 2](#2-finetune-on-v2x-pnp) — the data it needs is already in place.
 
 ---
 
